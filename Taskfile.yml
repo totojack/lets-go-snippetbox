@@ -13,6 +13,9 @@ vars:
   MYSQL_PORT: 3306 # The port exposed on the host machine
   MYSQL_WEB_USER: web
   MYSQL_WEB_PASSWORD: pass
+  APP_PORT: 4000 # Port where the Go web application runs
+  APP_PROCESS_NAME: snippetbox # Name to identify the running process
+  RUNTIME_DIR: .runtime # Directory for runtime files (logs, PIDs)
 
 tasks:
   # -------------------------------------------------------------------------
@@ -23,6 +26,10 @@ tasks:
     cmds:
       - echo "{{.GREETING}}"
     silent: true
+
+  # -------------------------------------------------------------------------
+  # DATABASE TASKS
+  # -------------------------------------------------------------------------
 
   # Builds the custom MySQL image from the Dockerfile
   build-db:
@@ -37,7 +44,7 @@ tasks:
       - mysql/01-init.sql
     silent: true
 
-  # Runs the custom MySQL container
+  # Starts the custom MySQL container
   start-db:
     desc: "Starts the MySQL container in the background."
     cmds:
@@ -176,4 +183,82 @@ tasks:
     # This task only runs if the container exists
     status:
       - test ! $(docker ps -a -q -f name={{.CONTAINER_NAME}})
+    silent: true
+
+  # -------------------------------------------------------------------------
+  # APPLICATION TASKS
+  # -------------------------------------------------------------------------
+
+  # Starts the Go web application (foreground)
+  start-app:
+    desc: "Starts the Go web application in the foreground."
+    deps:
+      - start-db
+    cmds:
+      - echo "Starting Go application on port {{.APP_PORT}}..."
+      - go run ./cmd/web
+    silent: true
+
+  # Starts the Go web application in the background
+  start-app-bg:
+    desc: "Starts the Go web application in the background."
+    deps:
+      - start-db
+    cmds:
+      - echo "Starting Go application in background on port {{.APP_PORT}}..."
+      - |
+        # Check if already running
+        if lsof -ti:{{.APP_PORT}} > /dev/null 2>&1; then
+          echo "⚠ Application already running on port {{.APP_PORT}}"
+          exit 0
+        fi
+        # Create runtime directory if it doesn't exist
+        mkdir -p {{.RUNTIME_DIR}}
+        # Start in background and save PID
+        nohup go run ./cmd/web > {{.RUNTIME_DIR}}/app.log 2>&1 &
+        echo $! > {{.RUNTIME_DIR}}/app.pid
+        sleep 1
+        if lsof -ti:{{.APP_PORT}} > /dev/null 2>&1; then
+          echo "✓ Application started (PID: $(cat {{.RUNTIME_DIR}}/app.pid))"
+          echo "  Logs: {{.RUNTIME_DIR}}/app.log"
+        else
+          echo "✗ Application failed to start. Check {{.RUNTIME_DIR}}/app.log"
+          exit 1
+        fi
+    silent: true
+
+  # Checks the Go application status
+  status-app:
+    desc: "Checks if the Go application is running."
+    cmds:
+      - |
+        echo "Checking Go application status..."
+        PID=$(lsof -ti:{{.APP_PORT}} 2>/dev/null || true)
+        if [ -n "$PID" ]; then
+          echo "✓ Application is RUNNING on port {{.APP_PORT}}"
+          echo "  PID: $PID"
+          if [ -f {{.RUNTIME_DIR}}/app.pid ]; then
+            echo "  Logs: {{.RUNTIME_DIR}}/app.log"
+          fi
+        else
+          echo "✗ Application is NOT running"
+        fi
+    silent: true
+
+  # Stops the Go web application
+  stop-app:
+    desc: "Stops the running Go web application."
+    cmds:
+      - echo "Stopping Go application..."
+      - |
+        # Find and kill the process running on the app port
+        PID=$(lsof -ti:{{.APP_PORT}})
+        if [ -n "$PID" ]; then
+          kill $PID
+          echo "✓ Application stopped (PID: $PID)"
+          # Clean up PID file if it exists
+          rm -f {{.RUNTIME_DIR}}/app.pid
+        else
+          echo "⚠ No application running on port {{.APP_PORT}}"
+        fi
     silent: true

@@ -1,6 +1,9 @@
 # Task runner cache
 .task/
 
+# Runtime files (logs, PIDs)
+.runtime/
+
 # Go build artifacts
 *.exe
 *.exe~
