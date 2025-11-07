@@ -1,0 +1,179 @@
+# https://taskfile.dev
+
+version: '3'
+
+# Define the variables used across tasks
+vars:
+  GREETING: Hello, World!
+  IMAGE_NAME: my-app-mysql
+  IMAGE_TAG: latest
+  CONTAINER_NAME: my-app-db
+  MYSQL_ROOT_PASSWORD: password
+  MYSQL_DATABASE: snippetbox
+  MYSQL_PORT: 3306 # The port exposed on the host machine
+  MYSQL_WEB_USER: web
+  MYSQL_WEB_PASSWORD: pass
+
+tasks:
+  # -------------------------------------------------------------------------
+  # BASE SETUP
+  # -------------------------------------------------------------------------
+
+  default:
+    cmds:
+      - echo "{{.GREETING}}"
+    silent: true
+
+  # Builds the custom MySQL image from the Dockerfile
+  build-db:
+    desc: "Builds the custom MySQL image with pre-loaded schema."
+    dir: docker
+    cmds:
+      - echo "Building image {{.IMAGE_NAME}}:{{.IMAGE_TAG}}"
+      - docker build -t {{.IMAGE_NAME}}:{{.IMAGE_TAG}} .
+    sources:
+      # These files trigger a rebuild if changed
+      - Dockerfile
+      - mysql/01-init.sql
+    silent: true
+
+  # Runs the custom MySQL container
+  start-db:
+    desc: "Starts the MySQL container in the background."
+    cmds:
+      - echo "Starting container {{.CONTAINER_NAME}} on port {{.MYSQL_PORT}}"
+      - |
+        if docker ps -a -f name={{.CONTAINER_NAME}} --format '{{.Names}}' | grep -q {{.CONTAINER_NAME}}; then
+          echo "Container exists. Starting it..."
+          docker start {{.CONTAINER_NAME}}
+        else
+          echo "Creating and starting new container..."
+          docker run -d \
+            --name {{.CONTAINER_NAME}} \
+            -p {{.MYSQL_PORT}}:3306 \
+            -e MYSQL_ROOT_PASSWORD={{.MYSQL_ROOT_PASSWORD}} \
+            -e MYSQL_DATABASE={{.MYSQL_DATABASE}} \
+            {{.IMAGE_NAME}}:{{.IMAGE_TAG}}
+        fi
+    # Dependencies ensure the image is built before attempting to run it
+    deps:
+      - build-db
+    # This task should be skipped if the container is already running
+    status:
+      - docker ps -f name={{.CONTAINER_NAME}} --format '{{.Names}}' | grep -q {{.CONTAINER_NAME}}
+    silent: true
+
+  # Checks the MySQL container status
+  status-db:
+    desc: "Checks the status of the MySQL container."
+    cmds:
+      - |
+        echo "Checking status of container: {{.CONTAINER_NAME}}"
+        if docker ps -f name={{.CONTAINER_NAME}} --format '{{`{{.Names}}`}}' | grep -q {{.CONTAINER_NAME}}; then
+          echo "✓ Container is RUNNING"
+          docker ps -f name={{.CONTAINER_NAME}} --format "table {{`{{.Names}}\t{{.Status}}\t{{.Ports}}`}}"
+        elif docker ps -a -f name={{.CONTAINER_NAME}} --format '{{`{{.Names}}`}}' | grep -q {{.CONTAINER_NAME}}; then
+          echo "⚠ Container exists but is STOPPED"
+          docker ps -a -f name={{.CONTAINER_NAME}} --format "table {{`{{.Names}}\t{{.Status}}`}}"
+        else
+          echo "✗ Container does NOT exist"
+        fi
+    silent: true
+
+  # Tests the database initialization and permissions
+  test-db:
+    desc: "Tests database initialization, web user access, and permissions."
+    deps:
+      - start-db
+    env:
+      DB_PASS: "{{.MYSQL_WEB_PASSWORD}}"
+    cmds:
+      - |
+        echo "Testing database initialization..."
+        echo ""
+
+        # Wait for MySQL to be fully ready (max 30 seconds)
+        echo "⏳ Waiting for MySQL to be ready..."
+        for i in {1..30}; do
+          if docker exec {{.CONTAINER_NAME}} mysqladmin ping -h localhost -u root -p{{.MYSQL_ROOT_PASSWORD}} --silent 2>/dev/null; then
+            echo "✓ MySQL is ready"
+            break
+          fi
+          if [ $i -eq 30 ]; then
+            echo "✗ MySQL failed to start within 30 seconds"
+            exit 1
+          fi
+          sleep 1
+        done
+        echo ""
+
+        # Test 1: Connect as web user and SELECT data
+        echo "TEST 1: SELECT query as 'web' user (should SUCCEED)"
+        echo "-------------------------------------------------------"
+        docker exec -e MYSQL_PWD="$DB_PASS" {{.CONTAINER_NAME}} \
+          mysql -u {{.MYSQL_WEB_USER}} -D {{.MYSQL_DATABASE}} -e "SELECT id, title, expires FROM snippets;"
+        if [ $? -eq 0 ]; then
+          echo "✓ SELECT query succeeded"
+        else
+          echo "✗ SELECT query failed"
+          exit 1
+        fi
+        echo ""
+
+        # Test 2: Try to INSERT (should succeed)
+        echo "TEST 2: INSERT query as 'web' user (should SUCCEED)"
+        echo "-------------------------------------------------------"
+        docker exec -e MYSQL_PWD="$DB_PASS" {{.CONTAINER_NAME}} \
+          mysql -u {{.MYSQL_WEB_USER}} -D {{.MYSQL_DATABASE}} \
+          -e "INSERT INTO snippets (title, content, created, expires) VALUES ('Test snippet', 'Test content', UTC_TIMESTAMP(), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY));"
+        if [ $? -eq 0 ]; then
+          echo "✓ INSERT query succeeded"
+        else
+          echo "✗ INSERT query failed"
+          exit 1
+        fi
+        echo ""
+
+        # Test 3: Try to DROP TABLE (should fail)
+        echo "TEST 3: DROP TABLE as 'web' user (should FAIL with permission error)"
+        echo "-------------------------------------------------------"
+        docker exec -e MYSQL_PWD="$DB_PASS" {{.CONTAINER_NAME}} \
+          mysql -u {{.MYSQL_WEB_USER}} -D {{.MYSQL_DATABASE}} \
+          -e "DROP TABLE snippets;" 2>&1 | grep -q "DROP command denied"
+        if [ $? -eq 0 ]; then
+          echo "✓ DROP TABLE correctly denied (permissions working as expected)"
+        else
+          echo "✗ DROP TABLE was allowed (permissions are TOO permissive!)"
+          exit 1
+        fi
+        echo ""
+
+        # Test 4: Try GRANT command (should fail)
+        echo "TEST 4: GRANT command as 'web' user (should FAIL with permission error)"
+        echo "-------------------------------------------------------"
+        docker exec -e MYSQL_PWD="$DB_PASS" {{.CONTAINER_NAME}} \
+          mysql -u {{.MYSQL_WEB_USER}} -D {{.MYSQL_DATABASE}} \
+          -e "GRANT ALL ON snippetbox.* TO 'web'@'localhost';" 2>&1 | grep -q "Access denied"
+        if [ $? -eq 0 ]; then
+          echo "✓ GRANT command correctly denied (permissions working as expected)"
+        else
+          echo "✗ GRANT command was allowed (permissions are TOO permissive!)"
+          exit 1
+        fi
+        echo ""
+
+        echo "========================================================="
+        echo "✓ All database tests PASSED!"
+        echo "========================================================="
+    silent: true
+
+  # Stops and removes the MySQL container
+  stop-db:
+    desc: "Stops and removes the MySQL container."
+    cmds:
+      - echo "Stopping and removing container {{.CONTAINER_NAME}}"
+      - docker rm -f {{.CONTAINER_NAME}}
+    # This task only runs if the container exists
+    status:
+      - test ! $(docker ps -a -q -f name={{.CONTAINER_NAME}})
+    silent: true
