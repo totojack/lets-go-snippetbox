@@ -13,6 +13,8 @@ vars:
   MYSQL_PORT: 3306 # The port exposed on the host machine
   MYSQL_WEB_USER: web
   MYSQL_WEB_PASSWORD: pass
+  ADMINER_CONTAINER_NAME: my-app-adminer
+  ADMINER_PORT: 8080 # Port where Adminer web UI runs
   APP_PORT: 4000 # Port where the Go web application runs
   APP_PROCESS_NAME: snippetbox # Name to identify the running process
   RUNTIME_DIR: .runtime # Directory for runtime files (logs, PIDs)
@@ -183,6 +185,100 @@ tasks:
     # This task only runs if the container exists
     status:
       - test ! $(docker ps -a -q -f name={{.CONTAINER_NAME}})
+    silent: true
+
+  # -------------------------------------------------------------------------
+  # DATABASE WEB UI (ADMINER) TASKS
+  # -------------------------------------------------------------------------
+
+  # Starts Adminer web UI for database management
+  start-adminer:
+    desc: "Starts Adminer web UI on port {{.ADMINER_PORT}}."
+    deps:
+      - start-db
+    cmds:
+      - echo "Starting Adminer web UI on http://localhost:{{.ADMINER_PORT}}"
+      - |
+        if docker ps -a -f name={{.ADMINER_CONTAINER_NAME}} --format '{{.Names}}' | grep -q {{.ADMINER_CONTAINER_NAME}}; then
+          echo "Container exists. Starting it..."
+          docker start {{.ADMINER_CONTAINER_NAME}}
+        else
+          echo "Creating and starting Adminer container..."
+          docker run -d \
+            --name {{.ADMINER_CONTAINER_NAME}} \
+            --link {{.CONTAINER_NAME}}:db \
+            -p {{.ADMINER_PORT}}:8080 \
+            adminer:latest
+        fi
+        echo ""
+        echo "========================================================="
+        echo "✓ Adminer is running at: http://localhost:{{.ADMINER_PORT}}"
+        echo "========================================================="
+        echo "Login credentials:"
+        echo "  System:   MySQL"
+        echo "  Server:   db"
+        echo "  Username: {{.MYSQL_WEB_USER}}"
+        echo "  Password: {{.MYSQL_WEB_PASSWORD}}"
+        echo "  Database: {{.MYSQL_DATABASE}}"
+        echo "========================================================="
+    status:
+      - docker ps -f name={{.ADMINER_CONTAINER_NAME}} --format '{{.Names}}' | grep -q {{.ADMINER_CONTAINER_NAME}}
+    silent: true
+
+  # Checks Adminer container status
+  status-adminer:
+    desc: "Checks the status of the Adminer container."
+    cmds:
+      - |
+        echo "Checking status of container: {{.ADMINER_CONTAINER_NAME}}"
+        if docker ps -f name={{.ADMINER_CONTAINER_NAME}} --format '{{`{{.Names}}`}}' | grep -q {{.ADMINER_CONTAINER_NAME}}; then
+          echo "✓ Adminer is RUNNING"
+          docker ps -f name={{.ADMINER_CONTAINER_NAME}} --format "table {{`{{.Names}}\t{{.Status}}\t{{.Ports}}`}}"
+          echo ""
+          echo "Access Adminer at: http://localhost:{{.ADMINER_PORT}}"
+        elif docker ps -a -f name={{.ADMINER_CONTAINER_NAME}} --format '{{`{{.Names}}`}}' | grep -q {{.ADMINER_CONTAINER_NAME}}; then
+          echo "⚠ Adminer container exists but is STOPPED"
+          docker ps -a -f name={{.ADMINER_CONTAINER_NAME}} --format "table {{`{{.Names}}\t{{.Status}}`}}"
+        else
+          echo "✗ Adminer container does NOT exist"
+        fi
+    silent: true
+
+  # Stops and removes the Adminer container
+  stop-adminer:
+    desc: "Stops and removes the Adminer container."
+    cmds:
+      - echo "Stopping and removing container {{.ADMINER_CONTAINER_NAME}}"
+      - docker rm -f {{.ADMINER_CONTAINER_NAME}}
+    status:
+      - test ! $(docker ps -a -q -f name={{.ADMINER_CONTAINER_NAME}})
+    silent: true
+
+  # -------------------------------------------------------------------------
+  # COMBINED SERVICES TASKS
+  # -------------------------------------------------------------------------
+
+  # Starts both database and adminer
+  start-services:
+    desc: "Starts both MySQL database and Adminer web UI."
+    deps:
+      - start-db
+      - start-adminer
+    cmds:
+      - echo ""
+      - echo "========================================================="
+      - echo "✓ All services are running!"
+      - echo "========================================================="
+    silent: true
+
+  # Stops both database and adminer
+  stop-services:
+    desc: "Stops and removes both MySQL database and Adminer containers."
+    deps:
+      - stop-adminer
+      - stop-db
+    cmds:
+      - echo "✓ All services stopped"
     silent: true
 
   # -------------------------------------------------------------------------

@@ -37,6 +37,16 @@ INSERT INTO snippets (title, content, created, expires) VALUES (
     UTC_TIMESTAMP(),
     DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 DAY));
 
+-- Create a `sessions` table for session management.
+CREATE TABLE sessions (
+    token CHAR(43) PRIMARY KEY,
+    data BLOB NOT NULL,
+    expiry TIMESTAMP(6) NOT NULL
+);
+
+-- Add an index on the expiry column.
+CREATE INDEX sessions_expiry_idx ON sessions (expiry);
+
 -- Create web user that can connect from any host (% wildcard)
 -- Also create for localhost for connections from within the container
 CREATE USER IF NOT EXISTS 'web'@'%' IDENTIFIED BY 'pass';
