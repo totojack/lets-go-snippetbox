@@ -1,0 +1,37 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "packages": [
+    "go@1.23.3",
+    "go-task@latest"
+  ],
+  "shell": {
+    "init_hook": [
+      "echo '🚀 Go Development Environment Ready!'",
+      "echo '📦 Go version:' && go version",
+      "echo '⚡ Task version:' && task --version",
+      "echo ''",
+      "echo 'Run \"task\" to see available commands'",
+      "echo ''",
+      "# Setup task completion for bash",
+      "if [ -n \"$BASH_VERSION\" ]; then",
+      "  eval \"$(task --completion bash)\"",
+      "  echo '✅ Task bash completion enabled'",
+      "fi",
+      "# Setup task completion for zsh",
+      "if [ -n \"$ZSH_VERSION\" ]; then",
+      "  eval \"$(task --completion zsh)\"",
+      "  echo '✅ Task zsh completion enabled'",
+      "fi",
+      "# Setup task completion for fish",
+      "if [ -n \"$FISH_VERSION\" ]; then",
+      "  task --completion fish | source",
+      "  echo '✅ Task fish completion enabled'",
+      "fi"
+    ],
+    "scripts": {
+      "test": [
+        "echo \"Error: no test specified\" && exit 1"
+      ]
+    }
+  }
+}
