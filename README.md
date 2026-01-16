@@ -27,23 +27,29 @@ The application will be available at <http://localhost:4000>
 #### Application Management
 
 - **Start application (foreground)**
+
   ```bash
   task start-app
   ```
+
   Starts the Go web server on port 4000 (automatically starts database if needed)
 
 - **Start application (background)**
+
   ```bash
   task start-app-bg
   ```
+
   Runs the application in the background, with logs in `.runtime/app.log`
 
 - **Check application status**
+
   ```bash
   task status-app
   ```
 
 - **Stop application**
+
   ```bash
   task stop-app
   ```
@@ -51,32 +57,41 @@ The application will be available at <http://localhost:4000>
 #### Database Management
 
 - **Build database image**
+
   ```bash
   task build-db
   ```
+
   Builds a custom MySQL Docker image with the initial schema
 
 - **Start database**
+
   ```bash
   task start-db
   ```
+
   Starts the MySQL container on port 3306
 
 - **Check database status**
+
   ```bash
   task status-db
   ```
 
 - **Test database**
+
   ```bash
   task test-db
   ```
+
   Runs tests to verify database initialization and permissions
 
 - **Stop database**
+
   ```bash
   task stop-db
   ```
+
   Stops and removes the MySQL container
 
 ## Configuration
